@@ -74,6 +74,7 @@ WebVideoServer::WebVideoServer(ros::NodeHandle &nh, ros::NodeHandle &private_nh)
   stream_types_["vp9"] = boost::shared_ptr<ImageStreamerType>(new Vp9StreamerType());
 
   handler_group_.addHandlerForPath("/", boost::bind(&WebVideoServer::handle_list_streams, this, _1, _2, _3, _4));
+  handler_group_.addHandlerForPath("/list", boost::bind(&WebVideoServer::handle_list_streams_json, this, _1, _2, _3, _4));
   handler_group_.addHandlerForPath("/stream", boost::bind(&WebVideoServer::handle_stream, this, _1, _2, _3, _4));
   handler_group_.addHandlerForPath("/stream_viewer",
                                    boost::bind(&WebVideoServer::handle_stream_viewer, this, _1, _2, _3, _4));
@@ -342,6 +343,107 @@ bool WebVideoServer::handle_list_streams(const async_web_server_cpp::HttpRequest
   return true;
 }
 
+bool WebVideoServer::handle_list_streams_json(const async_web_server_cpp::HttpRequest &request,
+                                         async_web_server_cpp::HttpConnectionPtr connection, const char* begin,
+                                         const char* end)
+{
+  std::string image_message_type = ros::message_traits::datatype<sensor_msgs::Image>();
+  std::string camera_info_message_type = ros::message_traits::datatype<sensor_msgs::CameraInfo>();
+
+  ros::master::V_TopicInfo topics;
+  ros::master::getTopics(topics);
+  ros::master::V_TopicInfo::iterator it;
+  std::vector<std::string> image_topics;
+  std::vector<std::string> camera_info_topics;
+  for (it = topics.begin(); it != topics.end(); ++it)
+  {
+    const ros::master::TopicInfo &topic = *it;
+    if (topic.datatype == image_message_type)
+    {
+      image_topics.push_back(topic.name);
+    }
+    else if (topic.datatype == camera_info_message_type)
+    {
+      camera_info_topics.push_back(topic.name);
+    }
+  }
+
+  async_web_server_cpp::HttpReply::builder(async_web_server_cpp::HttpReply::ok
+    ).header("Connection", "close"
+    ).header("Server", "web_video_server"
+    ).header("Cache-Control", "no-cache, no-store, must-revalidate, pre-check=0, post-check=0, max-age=0"
+    ).header("Pragma", "no-cache"
+    ).header("Content-type", "application/json"
+    ).header("Access-Control-Allow-Origin", "*"
+    ).write(connection);
+
+  // connection->write("{");
+  // BOOST_FOREACH(std::string & camera_info_topic, camera_info_topics)
+  // {
+  //   if (boost::algorithm::ends_with(camera_info_topic, "/camera_info"))
+  //   {
+  //     std::string base_topic = camera_info_topic.substr(0, camera_info_topic.size() - strlen("\"camera_info\": "));
+  //     connection->write(base_topic);
+  //     connection->write("[");
+  //     std::vector<std::string>::iterator image_topic_itr = image_topics.begin();
+  //     for (; image_topic_itr != image_topics.end();)
+  //     {
+  //       if (boost::starts_with(*image_topic_itr, base_topic))
+  //       {
+  //         connection->write("{");
+
+  //         connection->write("\"topic name\": \"");
+  //         connection->write(image_topic_itr->substr(base_topic.size()));
+  //         connection->write("\"");
+
+  //         // connection->write("<li><a href=\"/stream_viewer?topic=");
+  //         // connection->write(*image_topic_itr);
+  //         // connection->write("\">");
+          
+  //         // connection->write("</a> (");
+  //         // connection->write("<a href=\"/snapshot?topic=");
+  //         // connection->write(*image_topic_itr);
+  //         // connection->write("\">Snapshot</a>)");
+  //         // connection->write("</li>");
+
+  //         connection->write("}");
+  //         image_topic_itr = image_topics.erase(image_topic_itr);
+  //       }
+  //       else
+  //       {
+  //         ++image_topic_itr;
+  //       }
+  //     }
+  //     connection->write("], ");
+  //   }
+  // }
+  // connection->write("</ul>");
+
+  // Add the rest of the image topics that don't have camera_info.
+  connection->write("{");
+  std::vector<std::string>::iterator image_topic_itr = image_topics.begin();
+  connection->write("\"streams\": [");
+  for (; image_topic_itr != image_topics.end();) {
+    connection->write("{");
+
+    connection->write("\"name\": \"");
+    connection->write(*image_topic_itr);
+    connection->write("\",");
+
+    connection->write("\"streamUrl\": \"/stream?topic=");
+    connection->write(*image_topic_itr);
+    connection->write("\",");
+
+    connection->write("\"snapshotUrl\": \"/snapshot?topic=");
+    connection->write(*image_topic_itr);
+    connection->write("\"");
+
+    connection->write((std::next(image_topic_itr) != image_topics.end()) ? "}, " : "}");
+    image_topic_itr = image_topics.erase(image_topic_itr);
+  }
+  connection->write("]}");
+  return true;
+}
 }
 
 int main(int argc, char **argv)
